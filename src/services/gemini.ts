@@ -61,3 +61,51 @@ ${resumeText}
     );
   }
 };
+
+/**
+ * Refines a previously generated resume based on user instructions.
+ *
+ * @param currentResume - The currently displayed/tailored resume text.
+ * @param userInstruction - The user's request for refinement.
+ * @param originalJobDescription - The job description context.
+ * @returns A promise that resolves to the refined resume text.
+ */
+export const refineResume = async (
+  currentResume: string,
+  userInstruction: string,
+  originalJobDescription: string
+): Promise<string> => {
+  try {
+    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+
+    const prompt = `
+You are an Expert ATS Resume Writer and Career Coach. 
+The user has a tailored resume and wants to make a specific refinement.
+
+### Strict Rules:
+1. ONLY apply the changes requested in the "User Instruction". Do not rewrite sections that were not asked to be changed.
+2. DO NOT invent or fabricate any experiences, skills, or metrics. Preserve factual accuracy.
+3. Keep the output formatted purely in clean Markdown.
+4. Ensure the changes maintain high ATS optimization and a professional tone suitable for the original job description.
+5. Output ONLY the complete refined resume text. Do not include any conversational filler (e.g., "Here is the refined resume").
+
+### Job Description Context:
+${originalJobDescription}
+
+### User Instruction:
+${userInstruction}
+
+### Current Resume:
+${currentResume}
+    `;
+
+    const result = await model.generateContent(prompt);
+    const response = await result.response;
+    return response.text();
+  } catch (error) {
+    console.error("Error refining resume:", error);
+    throw new Error(
+      "Failed to communicate with Gemini AI. Please try again later."
+    );
+  }
+};

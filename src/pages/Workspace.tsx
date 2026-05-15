@@ -1,17 +1,26 @@
 import React, { useState, useEffect } from 'react';
-import { Upload, Sparkles, Loader2, Copy, RefreshCw, CheckCircle2, AlertCircle } from 'lucide-react';
-import { tailorResume } from '../services/gemini';
+import { Upload, Sparkles, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
+import { tailorResume, refineResume } from '../services/gemini';
+import { ResumeOutput } from '../components/workspace/ResumeOutput';
+import { RefinementChat } from '../components/workspace/RefinementChat';
+import type { Message } from '../components/workspace/ChatMessage';
 
 export const Workspace: React.FC = () => {
   const [resume, setResume] = useState('');
   const [jobDescription, setJobDescription] = useState('');
   const [isTailoring, setIsTailoring] = useState(false);
-  const [tailoredResult, setTailoredResult] = useState<string | null>(null);
+  const [isRefining, setIsRefining] = useState(false);
   
+  // Resume states
+  const [originalTailoredResume, setOriginalTailoredResume] = useState<string | null>(null);
+  const [currentTailoredResume, setCurrentTailoredResume] = useState<string | null>(null);
+  
+  // Chat state
+  const [chatMessages, setChatMessages] = useState<Message[]>([]);
+
   // Toast state
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
-  // Clear toast after 3 seconds
   useEffect(() => {
     if (toast) {
       const timer = setTimeout(() => setToast(null), 3000);
@@ -29,12 +38,15 @@ export const Workspace: React.FC = () => {
     }
 
     setIsTailoring(true);
-    setTailoredResult(null);
+    setCurrentTailoredResume(null);
+    setOriginalTailoredResume(null);
+    setChatMessages([]);
     setToast(null);
 
     try {
       const result = await tailorResume(resume, jobDescription);
-      setTailoredResult(result);
+      setCurrentTailoredResume(result);
+      setOriginalTailoredResume(result);
       setToast({ message: 'Resume successfully tailored!', type: 'success' });
     } catch (error: any) {
       setToast({ message: error.message || 'An error occurred during tailoring.', type: 'error' });
@@ -43,14 +55,70 @@ export const Workspace: React.FC = () => {
     }
   };
 
+  const handleRefine = async (instruction: string) => {
+    if (!currentTailoredResume) return;
+
+    // Add user message
+    const userMsg: Message = { id: Date.now().toString(), sender: 'user', text: instruction, timestamp: new Date() };
+    setChatMessages(prev => [...prev, userMsg]);
+    setIsRefining(true);
+
+    try {
+      const newResume = await refineResume(currentTailoredResume, instruction, jobDescription);
+      setCurrentTailoredResume(newResume);
+      
+      const aiMsg: Message = { 
+        id: (Date.now() + 1).toString(), 
+        sender: 'ai', 
+        text: 'I have updated your resume based on your instructions. Check the output above.', 
+        timestamp: new Date() 
+      };
+      setChatMessages(prev => [...prev, aiMsg]);
+      setToast({ message: 'Resume refined successfully.', type: 'success' });
+    } catch (error: any) {
+      setToast({ message: error.message || 'Failed to refine resume.', type: 'error' });
+      const errorMsg: Message = { 
+        id: (Date.now() + 1).toString(), 
+        sender: 'ai', 
+        text: 'Sorry, I encountered an error while trying to refine the resume. Please try again.', 
+        timestamp: new Date() 
+      };
+      setChatMessages(prev => [...prev, errorMsg]);
+    } finally {
+      setIsRefining(false);
+    }
+  };
+
   const handleCopy = async () => {
-    if (tailoredResult) {
+    if (currentTailoredResume) {
       try {
-        await navigator.clipboard.writeText(tailoredResult);
+        await navigator.clipboard.writeText(currentTailoredResume);
         setToast({ message: 'Copied to clipboard!', type: 'success' });
       } catch (err) {
         setToast({ message: 'Failed to copy text.', type: 'error' });
       }
+    }
+  };
+
+  const handleDownload = () => {
+    if (!currentTailoredResume) return;
+    const blob = new Blob([currentTailoredResume], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'Tailored_Resume.txt';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    setToast({ message: 'Resume downloaded!', type: 'success' });
+  };
+
+  const handleReset = () => {
+    if (originalTailoredResume) {
+      setCurrentTailoredResume(originalTailoredResume);
+      setChatMessages([]);
+      setToast({ message: 'Reset to original tailored version.', type: 'success' });
     }
   };
 
@@ -108,7 +176,7 @@ export const Workspace: React.FC = () => {
       <div className="flex justify-center py-4">
         <button
           onClick={handleTailor}
-          disabled={isTailoring || !isInputValid}
+          disabled={isTailoring || isRefining || !isInputValid}
           className="flex items-center gap-3 px-8 py-4 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl font-semibold shadow-lg shadow-indigo-500/30 transition-all active:scale-95"
         >
           {isTailoring ? (
@@ -119,64 +187,34 @@ export const Workspace: React.FC = () => {
           ) : (
             <>
               <Sparkles className="w-6 h-6" />
-              Tailor Resume Now
+              {originalTailoredResume ? 'Regenerate Base Resume' : 'Tailor Resume Now'}
             </>
           )}
         </button>
       </div>
 
-      {/* Result Section */}
-      <div className="bg-gray-900/50 backdrop-blur-xl border border-gray-800 rounded-2xl p-6 shadow-sm min-h-[300px] flex flex-col">
-        <div className="flex justify-between items-center mb-6">
-          <h2 className="text-xl font-semibold text-white flex items-center gap-2">
-            <Sparkles className="w-5 h-5 text-indigo-400" />
-            AI Tailored Output
-          </h2>
-          
-          {tailoredResult && (
-            <div className="flex items-center gap-2">
-              <button 
-                onClick={handleCopy}
-                className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-gray-300 bg-gray-800 hover:bg-gray-700 hover:text-white rounded-lg transition-colors border border-gray-700"
-              >
-                <Copy className="w-4 h-4" />
-                Copy
-              </button>
-              <button 
-                onClick={handleTailor}
-                disabled={isTailoring}
-                className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-indigo-300 bg-indigo-500/10 hover:bg-indigo-500/20 rounded-lg transition-colors border border-indigo-500/20 disabled:opacity-50"
-              >
-                <RefreshCw className={`w-4 h-4 ${isTailoring ? 'animate-spin' : ''}`} />
-                Regenerate
-              </button>
-            </div>
+      {/* Result & Refinement Section */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="lg:col-span-2">
+          <ResumeOutput 
+            content={currentTailoredResume} 
+            isTailoring={isTailoring || isRefining} 
+            onCopy={handleCopy}
+            onRegenerate={handleTailor}
+            onDownload={handleDownload}
+            onReset={handleReset}
+            hasRefinements={chatMessages.length > 0}
+          />
+        </div>
+        <div className="lg:col-span-1">
+          {originalTailoredResume && (
+            <RefinementChat 
+              messages={chatMessages} 
+              onSendMessage={handleRefine} 
+              isGenerating={isRefining} 
+            />
           )}
         </div>
-
-        {tailoredResult ? (
-          <div className="flex-1 bg-gray-950 rounded-xl p-6 border border-gray-800 overflow-y-auto max-h-[600px]">
-            <pre className="whitespace-pre-wrap font-sans text-gray-300 leading-relaxed">
-              {tailoredResult}
-            </pre>
-          </div>
-        ) : (
-          <div className="flex-1 flex flex-col items-center justify-center text-center p-8 border-2 border-dashed border-gray-800 rounded-xl">
-            {isTailoring ? (
-              <>
-                <Loader2 className="w-10 h-10 text-indigo-500 animate-spin mb-4" />
-                <p className="text-gray-400 font-medium">Analyzing inputs and generating your perfect resume...</p>
-                <p className="text-sm text-gray-500 mt-2">This usually takes about 5-10 seconds.</p>
-              </>
-            ) : (
-              <>
-                <Sparkles className="w-10 h-10 text-gray-700 mb-4" />
-                <p className="text-gray-400 font-medium">Your highly-optimized, tailored resume will appear here.</p>
-                <p className="text-sm text-gray-500 mt-2">Fill in your resume and job description above to get started.</p>
-              </>
-            )}
-          </div>
-        )}
       </div>
     </div>
   );
