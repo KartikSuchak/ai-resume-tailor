@@ -1,21 +1,28 @@
 import React, { useState, useEffect } from 'react';
 import { Upload, Sparkles, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { tailorResume, refineResume } from '../services/gemini';
+import { saveResume, updateResume } from '../services/firestore';
+import type { SavedResume } from '../services/firestore';
+import { useAuth } from '../hooks/useAuth';
 import { ResumeOutput } from '../components/workspace/ResumeOutput';
 import { RefinementChat } from '../components/workspace/RefinementChat';
 import type { Message } from '../components/workspace/ChatMessage';
 
 export const Workspace: React.FC = () => {
+  const { currentUser: user } = useAuth();
+  const location = useLocation();
+  const navigate = useNavigate();
+
   const [resume, setResume] = useState('');
   const [jobDescription, setJobDescription] = useState('');
   const [isTailoring, setIsTailoring] = useState(false);
   const [isRefining, setIsRefining] = useState(false);
   
-  // Resume states
+  // Document state
+  const [documentId, setDocumentId] = useState<string | null>(null);
   const [originalTailoredResume, setOriginalTailoredResume] = useState<string | null>(null);
   const [currentTailoredResume, setCurrentTailoredResume] = useState<string | null>(null);
-  
-  // Chat state
   const [chatMessages, setChatMessages] = useState<Message[]>([]);
 
   // Toast state
@@ -27,6 +34,32 @@ export const Workspace: React.FC = () => {
       return () => clearTimeout(timer);
     }
   }, [toast]);
+
+  // Load from state if opened from Saved Resumes page
+  useEffect(() => {
+    if (location.state?.savedResume) {
+      const savedData = location.state.savedResume as SavedResume;
+      setDocumentId(savedData.id);
+      setResume(savedData.originalResume);
+      setJobDescription(savedData.jobDescription);
+      setOriginalTailoredResume(savedData.originalTailoredResume);
+      setCurrentTailoredResume(savedData.currentTailoredResume);
+      
+      // Parse dates properly from Firestore if needed, though they might already be parsed or plain objects
+      // Map to ensure timestamp is a Date object for ChatMessage
+      const parsedMessages = savedData.chatMessages.map(msg => ({
+        ...msg,
+        // @ts-ignore - Handle firestore timestamp format
+        timestamp: msg.timestamp?.toDate ? msg.timestamp.toDate() : new Date(msg.timestamp)
+      }));
+      setChatMessages(parsedMessages);
+      
+      // Clear location state so refresh doesn't reload old data
+      navigate(location.pathname, { replace: true });
+      
+      setToast({ message: 'Loaded saved session.', type: 'success' });
+    }
+  }, [location, navigate]);
 
   const MIN_CHARS = 50;
   const isInputValid = resume.length >= MIN_CHARS && jobDescription.length >= MIN_CHARS;
@@ -41,15 +74,22 @@ export const Workspace: React.FC = () => {
     setCurrentTailoredResume(null);
     setOriginalTailoredResume(null);
     setChatMessages([]);
+    setDocumentId(null);
     setToast(null);
 
     try {
       const result = await tailorResume(resume, jobDescription);
       setCurrentTailoredResume(result);
       setOriginalTailoredResume(result);
-      setToast({ message: 'Resume successfully tailored!', type: 'success' });
+      
+      if (user) {
+        const newDocId = await saveResume(user.uid, resume, jobDescription, result);
+        setDocumentId(newDocId);
+      }
+
+      setToast({ message: 'Resume tailored and saved!', type: 'success' });
     } catch (error: any) {
-      setToast({ message: error.message || 'An error occurred during tailoring.', type: 'error' });
+      setToast({ message: error.message || 'An error occurred.', type: 'error' });
     } finally {
       setIsTailoring(false);
     }
@@ -58,9 +98,9 @@ export const Workspace: React.FC = () => {
   const handleRefine = async (instruction: string) => {
     if (!currentTailoredResume) return;
 
-    // Add user message
     const userMsg: Message = { id: Date.now().toString(), sender: 'user', text: instruction, timestamp: new Date() };
-    setChatMessages(prev => [...prev, userMsg]);
+    const newChatMessages = [...chatMessages, userMsg];
+    setChatMessages(newChatMessages);
     setIsRefining(true);
 
     try {
@@ -73,8 +113,15 @@ export const Workspace: React.FC = () => {
         text: 'I have updated your resume based on your instructions. Check the output above.', 
         timestamp: new Date() 
       };
-      setChatMessages(prev => [...prev, aiMsg]);
-      setToast({ message: 'Resume refined successfully.', type: 'success' });
+      
+      const finalChatMessages = [...newChatMessages, aiMsg];
+      setChatMessages(finalChatMessages);
+      
+      if (documentId) {
+        await updateResume(documentId, newResume, finalChatMessages);
+      }
+
+      setToast({ message: 'Resume refined and saved!', type: 'success' });
     } catch (error: any) {
       setToast({ message: error.message || 'Failed to refine resume.', type: 'error' });
       const errorMsg: Message = { 
@@ -114,10 +161,19 @@ export const Workspace: React.FC = () => {
     setToast({ message: 'Resume downloaded!', type: 'success' });
   };
 
-  const handleReset = () => {
+  const handleReset = async () => {
     if (originalTailoredResume) {
       setCurrentTailoredResume(originalTailoredResume);
       setChatMessages([]);
+      
+      if (documentId) {
+        try {
+          await updateResume(documentId, originalTailoredResume, []);
+        } catch (error) {
+          console.error('Failed to sync reset to Firestore', error);
+        }
+      }
+      
       setToast({ message: 'Reset to original tailored version.', type: 'success' });
     }
   };
