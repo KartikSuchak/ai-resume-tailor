@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Sparkles, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Sparkles, Loader2, CheckCircle2, AlertCircle, Image } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { tailorResume, refineResume } from '../services/gemini';
 import { saveResume, updateResume } from '../services/firestore';
@@ -8,6 +8,7 @@ import { useAuth } from '../hooks/useAuth';
 import { ResumeOutput } from '../components/workspace/ResumeOutput';
 import { RefinementChat } from '../components/workspace/RefinementChat';
 import { PDFUploader } from '../components/upload/PDFUploader';
+import { OCRUploader } from '../components/upload/OCRUploader';
 import type { Message } from '../components/workspace/ChatMessage';
 
 export const Workspace: React.FC = () => {
@@ -20,6 +21,13 @@ export const Workspace: React.FC = () => {
   const [isTailoring, setIsTailoring] = useState(false);
   const [isRefining, setIsRefining] = useState(false);
   const [isPasteMode, setIsPasteMode] = useState(false);
+
+  // Unified upload states
+  const [resumeUploadMode, setResumeUploadMode] = useState<'pdf' | 'ocr'>('pdf');
+  const [resumeSourceType, setResumeSourceType] = useState<'pdf' | 'ocr' | 'manual'>('manual');
+  
+  const [jobDescriptionSourceType, setJobDescriptionSourceType] = useState<'ocr' | 'manual'>('manual');
+  const [isJobDescriptionOcrMode, setIsJobDescriptionOcrMode] = useState(false);
   
   // Document state
   const [documentId, setDocumentId] = useState<string | null>(null);
@@ -196,40 +204,128 @@ export const Workspace: React.FC = () => {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Resume Section */}
-        <div className="bg-gray-900/50 backdrop-blur-xl border border-gray-800 rounded-2xl p-6 shadow-sm flex flex-col h-[500px]">
+        <div className="bg-gray-900/50 backdrop-blur-xl border border-gray-800 rounded-2xl p-6 shadow-sm flex flex-col h-[520px]">
           <div className="flex justify-between items-center mb-4 min-h-[44px]">
             <h2 className="text-lg font-medium text-white">Your Resume</h2>
-            <PDFUploader
-              resumeText={resume}
-              onTextExtracted={(text) => {
-                setResume(text);
-                setIsPasteMode(false);
-              }}
-              onClearResume={() => {
-                setResume('');
-                setIsPasteMode(false);
-              }}
-              onToast={(t) => setToast(t)}
-            />
+            
+            {resume ? (
+              // Active document controls depending on how the resume got populated
+              <div className="flex items-center gap-2">
+                {resumeSourceType === 'pdf' && (
+                  <PDFUploader
+                    resumeText={resume}
+                    onTextExtracted={(text) => {
+                      setResume(text);
+                      setResumeSourceType('pdf');
+                      setIsPasteMode(false);
+                    }}
+                    onClearResume={() => {
+                      setResume('');
+                      setResumeSourceType('manual');
+                      setIsPasteMode(false);
+                    }}
+                    onToast={(t) => setToast(t)}
+                  />
+                )}
+                {resumeSourceType === 'ocr' && (
+                  <OCRUploader
+                    currentText={resume}
+                    onTextExtracted={(text) => {
+                      setResume(text);
+                      setResumeSourceType('ocr');
+                      setIsPasteMode(false);
+                    }}
+                    onClear={() => {
+                      setResume('');
+                      setResumeSourceType('manual');
+                      setIsPasteMode(false);
+                    }}
+                    onToast={(t) => setToast(t)}
+                  />
+                )}
+                {resumeSourceType === 'manual' && (
+                  <button
+                    onClick={() => {
+                      setResume('');
+                      setIsPasteMode(false);
+                    }}
+                    className="text-xs font-semibold text-gray-400 hover:text-red-400 px-3 py-1.5 rounded-lg border border-gray-700/50 hover:border-red-500/20 bg-gray-800/40 hover:bg-red-500/5 transition-colors"
+                  >
+                    Clear Text
+                  </button>
+                )}
+              </div>
+            ) : (
+              // Upload mode tab selection when the resume field is empty
+              !isPasteMode && (
+                <div className="flex bg-gray-800/40 p-1 rounded-xl border border-gray-700/50">
+                  <button 
+                    onClick={() => setResumeUploadMode('pdf')} 
+                    className={`px-3 py-1 text-xs font-semibold rounded-lg transition-all ${
+                      resumeUploadMode === 'pdf' 
+                        ? 'bg-indigo-600 text-white shadow-sm' 
+                        : 'text-gray-400 hover:text-white'
+                    }`}
+                  >
+                    PDF
+                  </button>
+                  <button 
+                    onClick={() => setResumeUploadMode('ocr')} 
+                    className={`px-3 py-1 text-xs font-semibold rounded-lg transition-all ${
+                      resumeUploadMode === 'ocr' 
+                        ? 'bg-indigo-600 text-white shadow-sm' 
+                        : 'text-gray-400 hover:text-white'
+                    }`}
+                  >
+                    Image OCR
+                  </button>
+                </div>
+              )
+            )}
           </div>
           
           {!resume && !isPasteMode ? (
-            <div className="flex-1 flex flex-col">
-              <PDFUploader
-                resumeText={resume}
-                onTextExtracted={(text) => {
-                  setResume(text);
-                  setIsPasteMode(false);
-                }}
-                onClearResume={() => {
-                  setResume('');
-                  setIsPasteMode(false);
-                }}
-                onToast={(t) => setToast(t)}
-              />
+            <div className="flex-1 flex flex-col justify-between">
+              <div className="flex-1 flex flex-col">
+                {resumeUploadMode === 'pdf' ? (
+                  <PDFUploader
+                    resumeText={resume}
+                    onTextExtracted={(text) => {
+                      setResume(text);
+                      setResumeSourceType('pdf');
+                      setIsPasteMode(false);
+                    }}
+                    onClearResume={() => {
+                      setResume('');
+                      setResumeSourceType('manual');
+                      setIsPasteMode(false);
+                    }}
+                    onToast={(t) => setToast(t)}
+                  />
+                ) : (
+                  <OCRUploader
+                    currentText={resume}
+                    onTextExtracted={(text) => {
+                      setResume(text);
+                      setResumeSourceType('ocr');
+                      setIsPasteMode(false);
+                    }}
+                    onClear={() => {
+                      setResume('');
+                      setResumeSourceType('manual');
+                      setIsPasteMode(false);
+                    }}
+                    onToast={(t) => setToast(t)}
+                    placeholderText="Drag & drop scanned resume image here, or browse"
+                  />
+                )}
+              </div>
               <div className="mt-4 text-center">
                 <button
-                  onClick={() => setIsPasteMode(true)}
+                  onClick={() => {
+                    setIsPasteMode(true);
+                    setResumeSourceType('manual');
+                  }}
                   className="text-sm font-medium text-indigo-400 hover:text-indigo-300 hover:underline transition-colors focus:outline-none"
                 >
                   Or paste your resume text manually
@@ -240,7 +336,12 @@ export const Workspace: React.FC = () => {
             <div className="flex-1 flex flex-col h-full overflow-hidden">
               <textarea
                 value={resume}
-                onChange={(e) => setResume(e.target.value)}
+                onChange={(e) => {
+                  setResume(e.target.value);
+                  if (resumeSourceType !== 'manual') {
+                    setResumeSourceType('manual');
+                  }
+                }}
                 className="flex-1 w-full bg-gray-800/50 border border-gray-700 rounded-xl p-4 text-gray-200 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-none transition-all"
                 placeholder="Paste your original resume content here..."
               />
@@ -251,7 +352,7 @@ export const Workspace: React.FC = () => {
                       onClick={() => setIsPasteMode(false)}
                       className="text-indigo-400 hover:text-indigo-300 transition-colors"
                     >
-                      Use PDF Uploader instead
+                      Use File Uploaders instead
                     </button>
                   )}
                 </div>
@@ -264,17 +365,101 @@ export const Workspace: React.FC = () => {
         </div>
 
         {/* Job Description Section */}
-        <div className="bg-gray-900/50 backdrop-blur-xl border border-gray-800 rounded-2xl p-6 shadow-sm flex flex-col h-[500px]">
-          <h2 className="text-lg font-medium text-white mb-4">Job Description</h2>
-          <textarea
-            value={jobDescription}
-            onChange={(e) => setJobDescription(e.target.value)}
-            className="flex-1 w-full bg-gray-800/50 border border-gray-700 rounded-xl p-4 text-gray-200 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-none transition-all"
-            placeholder="Paste the target job description here..."
-          />
-          <div className="mt-2 text-right text-xs text-gray-500">
-            {jobDescription.length} characters {jobDescription.length > 0 && jobDescription.length < MIN_CHARS && `(min ${MIN_CHARS})`}
+        <div className="bg-gray-900/50 backdrop-blur-xl border border-gray-800 rounded-2xl p-6 shadow-sm flex flex-col h-[520px]">
+          <div className="flex justify-between items-center mb-4 min-h-[44px]">
+            <h2 className="text-lg font-medium text-white">Job Description</h2>
+            
+            {jobDescription ? (
+              // Active controls for job description
+              <div className="flex items-center gap-2">
+                {jobDescriptionSourceType === 'ocr' && (
+                  <OCRUploader
+                    currentText={jobDescription}
+                    onTextExtracted={(text) => {
+                      setJobDescription(text);
+                      setJobDescriptionSourceType('ocr');
+                      setIsJobDescriptionOcrMode(false);
+                    }}
+                    onClear={() => {
+                      setJobDescription('');
+                      setJobDescriptionSourceType('manual');
+                    }}
+                    onToast={(t) => setToast(t)}
+                  />
+                )}
+                {jobDescriptionSourceType === 'manual' && (
+                  <button
+                    onClick={() => {
+                      setJobDescription('');
+                      setIsJobDescriptionOcrMode(false);
+                    }}
+                    className="text-xs font-semibold text-gray-400 hover:text-red-400 px-3 py-1.5 rounded-lg border border-gray-700/50 hover:border-red-500/20 bg-gray-800/40 hover:bg-red-500/5 transition-colors"
+                  >
+                    Clear Text
+                  </button>
+                )}
+              </div>
+            ) : (
+              // Toggle Scan / OCR mode when job description field is empty
+              <button
+                onClick={() => setIsJobDescriptionOcrMode(!isJobDescriptionOcrMode)}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border border-gray-700 bg-gray-850 hover:bg-gray-800 text-gray-300 hover:text-white transition-all shadow-xs"
+              >
+                <Image className="w-3.5 h-3.5" />
+                {isJobDescriptionOcrMode ? 'Manual Paste' : 'Scan listing screenshot'}
+              </button>
+            )}
           </div>
+
+          {isJobDescriptionOcrMode && !jobDescription ? (
+            <div className="flex-1 flex flex-col justify-between">
+              <div className="flex-1 flex flex-col">
+                <OCRUploader
+                  currentText={jobDescription}
+                  onTextExtracted={(text) => {
+                    setJobDescription(text);
+                    setJobDescriptionSourceType('ocr');
+                    setIsJobDescriptionOcrMode(false);
+                  }}
+                  onClear={() => {
+                    setJobDescription('');
+                    setJobDescriptionSourceType('manual');
+                  }}
+                  onToast={(t) => setToast(t)}
+                  placeholderText="Drag & drop job listing screenshot here, or browse"
+                />
+              </div>
+            </div>
+          ) : (
+            <div className="flex-1 flex flex-col h-full overflow-hidden">
+              <textarea
+                value={jobDescription}
+                onChange={(e) => {
+                  setJobDescription(e.target.value);
+                  if (jobDescriptionSourceType !== 'manual') {
+                    setJobDescriptionSourceType('manual');
+                  }
+                }}
+                className="flex-1 w-full bg-gray-800/50 border border-gray-700 rounded-xl p-4 text-gray-200 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-none transition-all"
+                placeholder="Paste the target job description here..."
+              />
+              <div className="flex justify-between items-center mt-2 text-xs text-gray-500">
+                <div>
+                  {!jobDescription && !isJobDescriptionOcrMode && (
+                    <button
+                      onClick={() => setIsJobDescriptionOcrMode(true)}
+                      className="text-indigo-400 hover:text-indigo-300 transition-colors"
+                    >
+                      Use Screenshot OCR instead
+                    </button>
+                  )}
+                </div>
+                <div>
+                  {jobDescription.length} characters {jobDescription.length > 0 && jobDescription.length < MIN_CHARS && `(min ${MIN_CHARS})`}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
