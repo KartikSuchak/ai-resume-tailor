@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Upload, Sparkles, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Sparkles, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { tailorResume, refineResume } from '../services/gemini';
 import { saveResume, updateResume } from '../services/firestore';
@@ -7,6 +7,7 @@ import type { SavedResume } from '../services/firestore';
 import { useAuth } from '../hooks/useAuth';
 import { ResumeOutput } from '../components/workspace/ResumeOutput';
 import { RefinementChat } from '../components/workspace/RefinementChat';
+import { PDFUploader } from '../components/upload/PDFUploader';
 import type { Message } from '../components/workspace/ChatMessage';
 
 export const Workspace: React.FC = () => {
@@ -18,6 +19,7 @@ export const Workspace: React.FC = () => {
   const [jobDescription, setJobDescription] = useState('');
   const [isTailoring, setIsTailoring] = useState(false);
   const [isRefining, setIsRefining] = useState(false);
+  const [isPasteMode, setIsPasteMode] = useState(false);
   
   // Document state
   const [documentId, setDocumentId] = useState<string | null>(null);
@@ -195,22 +197,70 @@ export const Workspace: React.FC = () => {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Resume Section */}
         <div className="bg-gray-900/50 backdrop-blur-xl border border-gray-800 rounded-2xl p-6 shadow-sm flex flex-col h-[500px]">
-          <div className="flex justify-between items-center mb-4">
+          <div className="flex justify-between items-center mb-4 min-h-[44px]">
             <h2 className="text-lg font-medium text-white">Your Resume</h2>
-            <button className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-indigo-400 bg-indigo-500/10 hover:bg-indigo-500/20 rounded-lg transition-colors border border-indigo-500/20">
-              <Upload className="w-4 h-4" />
-              Upload PDF
-            </button>
+            <PDFUploader
+              resumeText={resume}
+              onTextExtracted={(text) => {
+                setResume(text);
+                setIsPasteMode(false);
+              }}
+              onClearResume={() => {
+                setResume('');
+                setIsPasteMode(false);
+              }}
+              onToast={(t) => setToast(t)}
+            />
           </div>
-          <textarea
-            value={resume}
-            onChange={(e) => setResume(e.target.value)}
-            className="flex-1 w-full bg-gray-800/50 border border-gray-700 rounded-xl p-4 text-gray-200 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-none transition-all"
-            placeholder="Paste your original resume content here..."
-          />
-          <div className="mt-2 text-right text-xs text-gray-500">
-            {resume.length} characters {resume.length > 0 && resume.length < MIN_CHARS && `(min ${MIN_CHARS})`}
-          </div>
+          
+          {!resume && !isPasteMode ? (
+            <div className="flex-1 flex flex-col">
+              <PDFUploader
+                resumeText={resume}
+                onTextExtracted={(text) => {
+                  setResume(text);
+                  setIsPasteMode(false);
+                }}
+                onClearResume={() => {
+                  setResume('');
+                  setIsPasteMode(false);
+                }}
+                onToast={(t) => setToast(t)}
+              />
+              <div className="mt-4 text-center">
+                <button
+                  onClick={() => setIsPasteMode(true)}
+                  className="text-sm font-medium text-indigo-400 hover:text-indigo-300 hover:underline transition-colors focus:outline-none"
+                >
+                  Or paste your resume text manually
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex-1 flex flex-col h-full overflow-hidden">
+              <textarea
+                value={resume}
+                onChange={(e) => setResume(e.target.value)}
+                className="flex-1 w-full bg-gray-800/50 border border-gray-700 rounded-xl p-4 text-gray-200 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-none transition-all"
+                placeholder="Paste your original resume content here..."
+              />
+              <div className="flex justify-between items-center mt-2 text-xs text-gray-500">
+                <div>
+                  {!resume && isPasteMode && (
+                    <button
+                      onClick={() => setIsPasteMode(false)}
+                      className="text-indigo-400 hover:text-indigo-300 transition-colors"
+                    >
+                      Use PDF Uploader instead
+                    </button>
+                  )}
+                </div>
+                <div>
+                  {resume.length} characters {resume.length > 0 && resume.length < MIN_CHARS && `(min ${MIN_CHARS})`}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Job Description Section */}
