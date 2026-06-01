@@ -9,14 +9,30 @@ interface ResumeCardProps {
 }
 
 export const ResumeCard: React.FC<ResumeCardProps> = ({ resume, onOpen, onDelete }) => {
-  // Format the timestamp if it exists
-  const formattedDate = resume.updatedAt?.toDate 
-    ? resume.updatedAt.toDate().toLocaleDateString('en-US', {
-        month: 'short',
-        day: 'numeric',
-        year: 'numeric'
-      })
-    : 'Recently';
+  // Format the timestamp robustly without throwing on serialized JSON objects
+  const getFormattedDate = (timestamp: any): string => {
+    if (!timestamp) return 'Recently';
+    let date: Date;
+    if (typeof timestamp.toDate === 'function') {
+      date = timestamp.toDate();
+    } else if (typeof timestamp.seconds === 'number') {
+      date = new Date(timestamp.seconds * 1000);
+    } else if (typeof timestamp.getTime === 'function') {
+      date = timestamp;
+    } else {
+      date = new Date(timestamp);
+    }
+    
+    return isNaN(date.getTime()) 
+      ? 'Recently' 
+      : date.toLocaleDateString('en-US', {
+          month: 'short',
+          day: 'numeric',
+          year: 'numeric'
+        });
+  };
+
+  const formattedDate = getFormattedDate(resume.updatedAt);
 
   return (
     <div className="bg-gray-900/50 backdrop-blur-xl border border-gray-800 rounded-2xl p-5 shadow-sm hover:border-indigo-500/50 transition-all group flex flex-col h-full">

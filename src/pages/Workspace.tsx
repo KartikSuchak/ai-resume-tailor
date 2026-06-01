@@ -88,17 +88,23 @@ export const Workspace: React.FC = () => {
     setToast(null);
 
     try {
+      console.log(`[SAVE] handleTailor triggered. Auth user:`, user ? `uid=${user.uid}` : 'null');
       const result = await tailorResume(resume, jobDescription);
       setCurrentTailoredResume(result);
       setOriginalTailoredResume(result);
       
       if (user) {
+        console.log(`[SAVE] Attempting automatic save after tailoring...`);
         const newDocId = await saveResume(user.uid, resume, jobDescription, result);
+        console.log(`[SAVE] saveResume resolved. documentId=${newDocId}`);
         setDocumentId(newDocId);
+      } else {
+        console.warn(`[SAVE] Auto-save skipped: User is not authenticated.`);
       }
 
       setToast({ message: 'Resume tailored and saved!', type: 'success' });
     } catch (error: any) {
+      console.error(`[SAVE] handleTailor save pipeline failed:`, error);
       setToast({ message: error.message || 'An error occurred.', type: 'error' });
     } finally {
       setIsTailoring(false);
@@ -114,6 +120,7 @@ export const Workspace: React.FC = () => {
     setIsRefining(true);
 
     try {
+      console.log(`[SAVE] handleRefine triggered. Auth user:`, user ? `uid=${user.uid}` : 'null', `documentId=${documentId}`);
       const newResume = await refineResume(currentTailoredResume, instruction, jobDescription);
       setCurrentTailoredResume(newResume);
       
@@ -128,11 +135,21 @@ export const Workspace: React.FC = () => {
       setChatMessages(finalChatMessages);
       
       if (documentId) {
+        console.log(`[SAVE] Attempting automatic update after refinement for documentId=${documentId}...`);
         await updateResume(documentId, newResume, finalChatMessages);
+      } else if (user) {
+        console.log(`[SAVE] No active documentId. Creating new Firestore document during refinement...`);
+        const newDocId = await saveResume(user.uid, resume, jobDescription, newResume);
+        setDocumentId(newDocId);
+        console.log(`[SAVE] Created new documentId=${newDocId} during refinement. Syncing chat history...`);
+        await updateResume(newDocId, newResume, finalChatMessages);
+      } else {
+        console.warn(`[SAVE] Auto-save refinement skipped: User is not authenticated and no documentId is active.`);
       }
 
       setToast({ message: 'Resume refined and saved!', type: 'success' });
     } catch (error: any) {
+      console.error(`[SAVE] handleRefine save pipeline failed:`, error);
       setToast({ message: error.message || 'Failed to refine resume.', type: 'error' });
       const errorMsg: Message = { 
         id: (Date.now() + 1).toString(), 
@@ -495,6 +512,7 @@ export const Workspace: React.FC = () => {
             onDownload={handleDownload}
             onReset={handleReset}
             hasRefinements={chatMessages.length > 0}
+            onToast={(t) => setToast(t)}
           />
         </div>
         <div className="lg:col-span-1">

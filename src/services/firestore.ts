@@ -39,12 +39,34 @@ const generateTitle = (jobDesc: string): string => {
 /**
  * Creates a new resume document in Firestore.
  */
+/**
+ * Creates a new resume document in Firestore.
+ */
 export const saveResume = async (
   userId: string,
   originalResume: string,
   jobDescription: string,
   tailoredResume: string
 ): Promise<string> => {
+  console.log(`[SAVE] Attempting save...`);
+  console.log(`[SAVE] User authenticated: uid=${userId}`);
+  
+  // Validate input parameters
+  if (!userId) {
+    console.error(`[SAVE] Validation failed: userId is missing.`);
+    throw new Error("User ID is required to save.");
+  }
+  if (!originalResume || !jobDescription || !tailoredResume) {
+    console.error(`[SAVE] Validation failed: Payloads cannot be empty.`, {
+      originalResumeLen: originalResume?.length,
+      jobDescLen: jobDescription?.length,
+      tailoredLen: tailoredResume?.length
+    });
+    throw new Error("Cannot save empty resume data.");
+  }
+  
+  console.log(`[SAVE] Payload validated`);
+
   try {
     const resumesRef = collection(db, RESUMES_COLLECTION);
     const newDocRef = doc(resumesRef); // auto-generate ID
@@ -61,11 +83,16 @@ export const saveResume = async (
       updatedAt: serverTimestamp(),
     };
 
+    console.log(`[SAVE] Document ID allocated: ${newDocRef.id}`);
+    console.log(`[SAVE] Sending Firestore setDoc payload:`, newResumeData);
+
     await setDoc(newDocRef, newResumeData);
+    
+    console.log(`[SAVE] Firestore write success: documentId=${newDocRef.id}`);
     return newDocRef.id;
-  } catch (error) {
-    console.error("Error saving resume to Firestore:", error);
-    throw new Error("Failed to save resume. Please try again.");
+  } catch (error: any) {
+    console.error("[SAVE] Firestore write CRITICAL FAILURE:", error);
+    throw new Error(`Failed to save resume: ${error.message || error}`);
   }
 };
 
@@ -77,23 +104,48 @@ export const updateResume = async (
   currentTailoredResume: string,
   chatMessages: Message[]
 ): Promise<void> => {
+  console.log(`[SAVE] Attempting update for documentId=${documentId}...`);
   try {
     const docRef = doc(db, RESUMES_COLLECTION, documentId);
+    
+    console.log(`[SAVE] Sending Firestore updateDoc payload. Messages count: ${chatMessages.length}`);
     await updateDoc(docRef, {
       currentTailoredResume,
       chatMessages,
       updatedAt: serverTimestamp(),
     });
-  } catch (error) {
-    console.error("Error updating resume in Firestore:", error);
-    throw new Error("Failed to update resume.");
+    
+    console.log(`[SAVE] Firestore update success: documentId=${documentId}`);
+  } catch (error: any) {
+    console.error("[SAVE] Firestore update CRITICAL FAILURE:", error);
+    throw new Error(`Failed to update resume: ${error.message || error}`);
   }
+};
+
+/**
+ * Safe utility to extract millisecond timestamp from various Firestore date representations.
+ * Handles Timestamps, plain Dates, strings, and parsed JSON structures without crashing.
+ */
+const getTimestampMillis = (timestamp: any): number => {
+  if (!timestamp) return 0;
+  if (typeof timestamp.toMillis === 'function') {
+    return timestamp.toMillis();
+  }
+  if (typeof timestamp.getTime === 'function') {
+    return timestamp.getTime();
+  }
+  if (typeof timestamp.seconds === 'number') {
+    return timestamp.seconds * 1000 + Math.floor((timestamp.nanoseconds || 0) / 1000000);
+  }
+  const parsed = Date.parse(timestamp);
+  return isNaN(parsed) ? 0 : parsed;
 };
 
 /**
  * Fetches all saved resumes for a specific user.
  */
 export const getUserResumes = async (userId: string): Promise<SavedResume[]> => {
+  console.log(`[LOAD] Fetching resumes for uid=${userId}...`);
   try {
     const resumesRef = collection(db, RESUMES_COLLECTION);
     const q = query(resumesRef, where("userId", "==", userId));
@@ -104,15 +156,16 @@ export const getUserResumes = async (userId: string): Promise<SavedResume[]> => 
       resumes.push({ id: doc.id, ...doc.data() } as SavedResume);
     });
     
-    // Sort client-side by updatedAt descending for simplicity
-    // Note: requires indexing if sorted server-side via orderBy
+    console.log(`[LOAD] Retrieved ${resumes.length} resumes`);
+    
+    // Sort client-side by updatedAt descending using a crash-free serialization helper
     return resumes.sort((a, b) => {
-      const timeA = a.updatedAt?.toMillis() || 0;
-      const timeB = b.updatedAt?.toMillis() || 0;
+      const timeA = getTimestampMillis(a.updatedAt);
+      const timeB = getTimestampMillis(b.updatedAt);
       return timeB - timeA;
     });
   } catch (error) {
-    console.error("Error fetching resumes from Firestore:", error);
+    console.error("[LOAD] Critical error fetching resumes from Firestore:", error);
     throw new Error("Failed to fetch saved resumes.");
   }
 };
