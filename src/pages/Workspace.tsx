@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Sparkles, Loader2, CheckCircle2, AlertCircle, Image } from 'lucide-react';
+import { Sparkles, Loader2, CheckCircle2, AlertCircle, Image, Trash2, FileText } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { tailorResume, refineResume } from '../services/gemini';
 import { saveResume, updateResume } from '../services/firestore';
@@ -11,29 +11,98 @@ import { PDFUploader } from '../components/upload/PDFUploader';
 import { OCRUploader } from '../components/upload/OCRUploader';
 import type { Message } from '../components/workspace/ChatMessage';
 
+const generateTitle = (jobDesc: string): string => {
+  const firstLine = jobDesc.split('\n')[0].trim();
+  const title = firstLine.length > 50 ? firstLine.substring(0, 50) + '...' : firstLine;
+  return title || 'Untitled Resume';
+};
+
 export const Workspace: React.FC = () => {
   const { currentUser: user } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
 
-  const [resume, setResume] = useState('');
-  const [jobDescription, setJobDescription] = useState('');
+  // Load initial state from localStorage or route state
+  const [initialData] = useState(() => {
+    let localData: any = null;
+    try {
+      const stored = localStorage.getItem('ai_resume_tailor_workspace_state');
+      if (stored) {
+        localData = JSON.parse(stored);
+      }
+    } catch (e) {
+      console.error('Error reading workspace state from localStorage', e);
+    }
+
+    const hasLocalChanges = localData && (
+      (localData.resume && localData.resume.trim() !== '') ||
+      (localData.jobDescription && localData.jobDescription.trim() !== '')
+    );
+
+    // If navigated from Saved Resumes and there are NO unsaved changes, initialize directly
+    if (location.state?.savedResume && !hasLocalChanges) {
+      const savedData = location.state.savedResume as SavedResume;
+      const parsedMessages = savedData.chatMessages.map(msg => ({
+        ...msg,
+        // @ts-ignore
+        timestamp: msg.timestamp?.toDate ? msg.timestamp.toDate() : new Date(msg.timestamp)
+      }));
+      return {
+        resume: savedData.originalResume || '',
+        jobDescription: savedData.jobDescription || '',
+        originalTailoredResume: savedData.originalTailoredResume || null,
+        currentTailoredResume: savedData.currentTailoredResume || null,
+        chatMessages: parsedMessages,
+        documentId: savedData.id || null,
+        sessionTitle: savedData.title || null,
+        resumeSourceType: 'manual' as const,
+        jobDescriptionSourceType: 'manual' as const
+      };
+    }
+
+    // Otherwise load from localStorage or default
+    if (localData) {
+      if (localData.chatMessages) {
+        localData.chatMessages = localData.chatMessages.map((msg: any) => ({
+          ...msg,
+          timestamp: new Date(msg.timestamp)
+        }));
+      }
+      return localData;
+    }
+
+    return null;
+  });
+
+  const [resume, setResume] = useState(() => initialData?.resume ?? '');
+  const [jobDescription, setJobDescription] = useState(() => initialData?.jobDescription ?? '');
   const [isTailoring, setIsTailoring] = useState(false);
   const [isRefining, setIsRefining] = useState(false);
-  const [isPasteMode, setIsPasteMode] = useState(false);
+  const [isPasteMode, setIsPasteMode] = useState(() => {
+    if (initialData?.resume && initialData?.resumeSourceType === 'manual') {
+      return true;
+    }
+    return false;
+  });
 
   // Unified upload states
   const [resumeUploadMode, setResumeUploadMode] = useState<'pdf' | 'ocr'>('pdf');
-  const [resumeSourceType, setResumeSourceType] = useState<'pdf' | 'ocr' | 'manual'>('manual');
+  const [resumeSourceType, setResumeSourceType] = useState<'pdf' | 'ocr' | 'manual'>(() => initialData?.resumeSourceType ?? 'manual');
   
-  const [jobDescriptionSourceType, setJobDescriptionSourceType] = useState<'ocr' | 'manual'>('manual');
-  const [isJobDescriptionOcrMode, setIsJobDescriptionOcrMode] = useState(false);
+  const [jobDescriptionSourceType, setJobDescriptionSourceType] = useState<'ocr' | 'manual'>(() => initialData?.jobDescriptionSourceType ?? 'manual');
+  const [isJobDescriptionOcrMode, setIsJobDescriptionOcrMode] = useState(() => {
+    if (initialData?.jobDescription && initialData?.jobDescriptionSourceType === 'ocr') {
+      return true;
+    }
+    return false;
+  });
   
   // Document state
-  const [documentId, setDocumentId] = useState<string | null>(null);
-  const [originalTailoredResume, setOriginalTailoredResume] = useState<string | null>(null);
-  const [currentTailoredResume, setCurrentTailoredResume] = useState<string | null>(null);
-  const [chatMessages, setChatMessages] = useState<Message[]>([]);
+  const [documentId, setDocumentId] = useState<string | null>(() => initialData?.documentId ?? null);
+  const [sessionTitle, setSessionTitle] = useState<string | null>(() => initialData?.sessionTitle ?? null);
+  const [originalTailoredResume, setOriginalTailoredResume] = useState<string | null>(() => initialData?.originalTailoredResume ?? null);
+  const [currentTailoredResume, setCurrentTailoredResume] = useState<string | null>(() => initialData?.currentTailoredResume ?? null);
+  const [chatMessages, setChatMessages] = useState<Message[]>(() => initialData?.chatMessages ?? []);
 
   // Toast state
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
@@ -45,18 +114,34 @@ export const Workspace: React.FC = () => {
     }
   }, [toast]);
 
-  // Load from state if opened from Saved Resumes page
+  // Load from state if opened from Saved Resumes page, with unsaved changes safeguard
   useEffect(() => {
     if (location.state?.savedResume) {
       const savedData = location.state.savedResume as SavedResume;
+      
+      const hasUnsavedChanges = 
+        (resume.trim() !== '' || jobDescription.trim() !== '') && 
+        documentId !== savedData.id;
+
+      if (hasUnsavedChanges) {
+        const confirmReplace = window.confirm(
+          "Opening this saved resume will replace your current workspace. Continue?"
+        );
+        if (!confirmReplace) {
+          // Clear route state to prevent repeating the prompt and return
+          navigate(location.pathname, { replace: true });
+          return;
+        }
+      }
+
       setDocumentId(savedData.id);
       setResume(savedData.originalResume);
       setJobDescription(savedData.jobDescription);
       setOriginalTailoredResume(savedData.originalTailoredResume);
       setCurrentTailoredResume(savedData.currentTailoredResume);
+      setSessionTitle(savedData.title || null);
       
-      // Parse dates properly from Firestore if needed, though they might already be parsed or plain objects
-      // Map to ensure timestamp is a Date object for ChatMessage
+      // Parse dates properly from Firestore if needed
       const parsedMessages = savedData.chatMessages.map(msg => ({
         ...msg,
         // @ts-ignore - Handle firestore timestamp format
@@ -69,7 +154,37 @@ export const Workspace: React.FC = () => {
       
       setToast({ message: 'Loaded saved session.', type: 'success' });
     }
-  }, [location, navigate]);
+  }, [location, navigate, resume, jobDescription, documentId]);
+
+  // Persist state to localStorage on change
+  useEffect(() => {
+    const stateToPersist = {
+      resume,
+      jobDescription,
+      originalTailoredResume,
+      currentTailoredResume,
+      chatMessages,
+      documentId,
+      sessionTitle,
+      resumeSourceType,
+      jobDescriptionSourceType
+    };
+    try {
+      localStorage.setItem('ai_resume_tailor_workspace_state', JSON.stringify(stateToPersist));
+    } catch (e) {
+      console.error('Failed to save workspace state to localStorage:', e);
+    }
+  }, [
+    resume,
+    jobDescription,
+    originalTailoredResume,
+    currentTailoredResume,
+    chatMessages,
+    documentId,
+    sessionTitle,
+    resumeSourceType,
+    jobDescriptionSourceType
+  ]);
 
   const MIN_CHARS = 50;
   const isInputValid = resume.length >= MIN_CHARS && jobDescription.length >= MIN_CHARS;
@@ -92,6 +207,7 @@ export const Workspace: React.FC = () => {
       const result = await tailorResume(resume, jobDescription);
       setCurrentTailoredResume(result);
       setOriginalTailoredResume(result);
+      setSessionTitle(generateTitle(jobDescription));
       
       if (user) {
         console.log(`[SAVE] Attempting automatic save after tailoring...`);
@@ -141,6 +257,7 @@ export const Workspace: React.FC = () => {
         console.log(`[SAVE] No active documentId. Creating new Firestore document during refinement...`);
         const newDocId = await saveResume(user.uid, resume, jobDescription, newResume);
         setDocumentId(newDocId);
+        setSessionTitle(generateTitle(jobDescription));
         console.log(`[SAVE] Created new documentId=${newDocId} during refinement. Syncing chat history...`);
         await updateResume(newDocId, newResume, finalChatMessages);
       } else {
@@ -160,6 +277,22 @@ export const Workspace: React.FC = () => {
       setChatMessages(prev => [...prev, errorMsg]);
     } finally {
       setIsRefining(false);
+    }
+  };
+
+  const handleClearSession = () => {
+    if (window.confirm('Are you sure you want to clear your current workspace session? This will remove all unsaved progress.')) {
+      setResume('');
+      setJobDescription('');
+      setOriginalTailoredResume(null);
+      setCurrentTailoredResume(null);
+      setChatMessages([]);
+      setDocumentId(null);
+      setSessionTitle(null);
+      setResumeSourceType('manual');
+      setJobDescriptionSourceType('manual');
+      localStorage.removeItem('ai_resume_tailor_workspace_state');
+      setToast({ message: 'Workspace cleared.', type: 'success' });
     }
   };
 
@@ -218,6 +351,38 @@ export const Workspace: React.FC = () => {
           <p className="font-medium text-sm">{toast.message}</p>
         </div>
       )}
+
+      {/* Workspace Header / Toolbar */}
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-gray-900/40 backdrop-blur-xl border border-gray-800/80 rounded-2xl p-4 sm:p-5 shadow-sm">
+        <div className="flex items-center gap-3">
+          <div className="p-2.5 bg-indigo-500/10 rounded-xl text-indigo-400">
+            <FileText className="w-6 h-6" />
+          </div>
+          <div>
+            <h1 className="text-lg font-bold text-white flex flex-wrap items-center gap-2">
+              <span>Tailoring Workspace</span>
+              {sessionTitle && (
+                <span className="text-xs font-normal text-indigo-400 bg-indigo-500/10 px-2.5 py-0.5 rounded-full border border-indigo-500/20 max-w-[200px] sm:max-w-[300px] truncate" title={sessionTitle}>
+                  {sessionTitle}
+                </span>
+              )}
+            </h1>
+            <p className="text-xs text-gray-400 mt-0.5">
+              {documentId ? 'Synced with Firestore' : 'Unsaved Local Draft'}
+            </p>
+          </div>
+        </div>
+        
+        <div className="flex items-center gap-3 w-full sm:w-auto justify-end">
+          <button
+            onClick={handleClearSession}
+            className="flex items-center gap-2 px-3 py-1.5 text-xs font-semibold text-gray-400 hover:text-red-400 hover:bg-red-500/10 border border-gray-800 hover:border-red-500/20 rounded-xl transition-all cursor-pointer active:scale-95"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+            Clear Session
+          </button>
+        </div>
+      </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Resume Section */}
