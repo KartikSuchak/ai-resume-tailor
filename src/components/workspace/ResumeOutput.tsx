@@ -2,7 +2,6 @@ import React from 'react';
 import ReactMarkdown from 'react-markdown';
 import { Sparkles, Copy, RefreshCw, Download, RotateCcw, Loader2 } from 'lucide-react';
 import { ExportPDFButton } from '../export/ExportPDFButton';
-import { ResumePDFTemplate } from '../export/ResumePDFTemplate';
 
 interface ResumeOutputProps {
   content: string | null;
@@ -13,6 +12,7 @@ interface ResumeOutputProps {
   onReset: () => void;
   hasRefinements: boolean;
   onToast: (toast: { message: string; type: 'success' | 'error' }) => void;
+  sessionTitle: string | null;
 }
 
 export const ResumeOutput: React.FC<ResumeOutputProps> = ({
@@ -23,7 +23,8 @@ export const ResumeOutput: React.FC<ResumeOutputProps> = ({
   onDownload,
   onReset,
   hasRefinements,
-  onToast
+  onToast,
+  sessionTitle
 }) => {
   return (
     <div className="bg-gray-900/50 backdrop-blur-xl border border-gray-800 rounded-2xl p-6 shadow-sm min-h-[400px] flex flex-col">
@@ -60,7 +61,7 @@ export const ResumeOutput: React.FC<ResumeOutputProps> = ({
               <Download className="w-4 h-4" />
               <span className="hidden sm:inline">TXT</span>
             </button>
-            <ExportPDFButton content={content} onToast={onToast} />
+            <ExportPDFButton content={content} onToast={onToast} sessionTitle={sessionTitle} />
             <button 
               onClick={onRegenerate}
               disabled={isTailoring}
@@ -94,24 +95,6 @@ export const ResumeOutput: React.FC<ResumeOutputProps> = ({
               <p className="text-sm text-gray-500 mt-2">Fill in your resume and job description above to get started.</p>
             </>
           )}
-        </div>
-      )}
-
-      {/* Hidden off-screen resume template for high-fidelity PDF exporting */}
-      {content && (
-        <div 
-          style={{
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            width: 0,
-            height: 0,
-            overflow: 'hidden',
-            zIndex: -9999,
-            pointerEvents: 'none',
-          }}
-        >
-          <ResumePDFTemplate content={content} />
         </div>
       )}
     </div>

@@ -678,6 +678,7 @@ export const Workspace: React.FC = () => {
             onReset={handleReset}
             hasRefinements={chatMessages.length > 0}
             onToast={(t) => setToast(t)}
+            sessionTitle={sessionTitle}
           />
         </div>
         <div className="lg:col-span-1">
