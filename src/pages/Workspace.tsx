@@ -237,7 +237,7 @@ export const Workspace: React.FC = () => {
 
     try {
       console.log(`[SAVE] handleRefine triggered. Auth user:`, user ? `uid=${user.uid}` : 'null', `documentId=${documentId}`);
-      const newResume = await refineResume(currentTailoredResume, instruction, jobDescription);
+      const newResume = await refineResume(currentTailoredResume, instruction);
       setCurrentTailoredResume(newResume);
       
       const aiMsg: Message = { 
